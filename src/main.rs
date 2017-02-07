@@ -1,23 +1,21 @@
 extern crate clap;
 // TODO: daemonize
 //extern crate daemonize;
-// TODO: replace socket with named fifo
-extern crate unix_socket;
 extern crate serial;
 
 use clap::{App, Arg};
-use unix_socket::UnixListener;
+use std::fs::File;
+use std::io::{BufReader, BufRead, Write, stderr};
 use std::process::exit;
-use std::io::{Read, Write, stderr};
 
 fn main() {
     let matches = App::new("arduino-serial-send")
         .version("1.0")
-        .about("Daemon that keeps a serial port alive and forwards messages to it from a socket \
-                file.")
-        .arg(Arg::with_name("socket")
-            .long("sock")
-            .help("Custom socket file path (default: /tmp/send_to_arduino)")
+        .about("Daemon that keeps a serial port alive and forwards messages to it from a named \
+                pipe / fifo.")
+        .arg(Arg::with_name("fifo")
+            .long("fifo")
+            .help("Custom fifo file path (default: /tmp/send_to_arduino)")
             .takes_value(true))
         .arg(Arg::with_name("serial")
             .long("serial")
@@ -25,7 +23,7 @@ fn main() {
             .takes_value(true))
         .get_matches();
 
-    let socket_path = matches.value_of("socket").unwrap_or("/tmp/send_to_arduino");
+    let fifo_path = matches.value_of("socket").unwrap_or("/tmp/send_to_arduino");
     let serial_path = match matches.value_of("serial") {
         Some(p) => p,
         None => {
@@ -35,16 +33,7 @@ fn main() {
         }
     };
 
-    let socket = match UnixListener::bind(socket_path) {
-        Ok(s) => s,
-        Err(_) => {
-            writeln!(&mut stderr(), "Couldn't create socket '{}'.", socket_path).unwrap();
-            exit(1)
-        }
-    };
-
-    // This part error on rail.fd right now :(
-    let mut serial = match serial::open(socket_path) {
+    let mut serial = match serial::open(serial_path) {
         Ok(s) => s,
         Err(_) => {
             writeln!(&mut stderr(),
@@ -55,14 +44,22 @@ fn main() {
         }
     };
 
-    loop {
-        let (mut stream, _) = socket.accept().unwrap();
-        let mut buf = String::new();
+    // TODO: Configure serial port
 
-        if let Err(_) = stream.read_to_string(&mut buf) {
-            continue;
+    loop {
+        // Reopen the fifo after every EOF - not a very nice solution! [TODO]
+        let fifo = match File::open(fifo_path) {
+            Ok(s) => s,
+            Err(_) => {
+                writeln!(&mut stderr(), "Couldn't open fifo '{}'.", fifo_path).unwrap();
+                exit(1)
+            }
         };
 
-        serial.write(buf.as_bytes()).unwrap();
+        let fifo_reader = BufReader::new(fifo);
+
+        for line in fifo_reader.lines() {
+            serial.write(line.unwrap().as_bytes()).unwrap();
+        }
     }
 }
