@@ -1,12 +1,14 @@
 extern crate clap;
-// TODO: daemonize
 //extern crate daemonize;
 extern crate serial;
 
-use clap::{App, Arg};
 use std::fs::File;
 use std::io::{BufReader, BufRead, Write, stderr};
 use std::process::exit;
+
+use clap::{App, Arg};
+//use daemonize::Daemonize;
+use serial::SerialPort;
 
 fn main() {
     let matches = App::new("arduino-serial-send")
@@ -44,7 +46,16 @@ fn main() {
         }
     };
 
-    // TODO: Configure serial port
+    if serial.reconfigure(&|settings| settings.set_baud_rate(serial::Baud9600)).is_err() {
+        writeln!(&mut stderr(),
+                 "Couldn't configure serial port '{}'.",
+                 serial_path)
+            .unwrap();
+        exit(1);
+    }
+
+    // TODO: non-stderr logging
+    // Daemonize::new().start();
 
     loop {
         // Reopen the fifo after every EOF - not a very nice solution! [TODO]
@@ -59,7 +70,7 @@ fn main() {
         let fifo_reader = BufReader::new(fifo);
 
         for line in fifo_reader.lines() {
-            serial.write(line.unwrap().as_bytes()).unwrap();
+            serial.write_all(line.unwrap().as_bytes()).unwrap();
         }
     }
 }
